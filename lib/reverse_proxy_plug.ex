@@ -98,13 +98,61 @@ defmodule ReverseProxyPlug do
   def request(conn, body, opts) do
     {method, url, headers, client_options} = prepare_request(conn, opts)
 
-    opts[:client].request(%HTTPClient.Request{
-      method: method,
-      url: url,
-      body: body,
-      headers: headers,
-      options: client_options
-    })
+    if websocket_request?(headers) do
+      handle_websocket(url, headers)
+    else
+      opts[:client].request(%HTTPClient.Request{
+        method: method,
+        url: url,
+        body: body,
+        headers: headers,
+        options: client_options
+      })
+    end
+  end
+
+  def websocket_request?(headers) do
+    matching_headers =
+      Enum.filter(headers, fn
+        {"connection", "keep-alive, Upgrade"} -> true
+        {"upgrade", "websocket"} -> true
+        _ -> false
+      end)
+
+    length(matching_headers) == 2
+  end
+
+  def handle_websocket(url, headers) do
+    IO.puts("Handling websocket!")
+    IO.inspect(url, label: "url (reverse_proxy_plug.ex:128)")
+    IO.inspect(headers, label: "headers (reverse_proxy_plug.ex:129)")
+    %{path: path} = URI.parse(url)
+    # bootstrap
+    {:ok, conn} = Mint.HTTP.connect(:http, "localhost", 4002)
+
+    # TODO: make Configurable
+    {:ok, conn, ref} = Mint.WebSocket.upgrade(conn, path, [])
+
+    http_get_message = receive(do: (message -> message))
+
+    stream = Mint.HTTP.stream(conn, http_get_message)
+
+    {:ok, conn,
+     [{:status, ^ref, status}, {:headers, ^ref, resp_headers}, {:done, ^ref}]} =
+      stream
+
+    IO.puts("\n")
+    IO.inspect(ref, label: "ref (reverse_proxy_plug.ex:147)")
+    IO.inspect(status, label: "status (reverse_proxy_plug.ex:148)")
+    IO.inspect(resp_headers, label: "resp_headers (reverse_proxy_plug.ex:149)")
+
+    {:ok, conn, websocket} = Mint.WebSocket.new(conn, ref, status, resp_headers)
+    IO.inspect(websocket, label: "websocket (reverse_proxy_plug.ex:151)")
+
+    # send the hello world frame
+    # {:ok, websocket, data} = Mint.WebSocket.encode(websocket, {:text, "hello world"})
+    # {:ok, conn} = Mint.HTTP.stream_request_body(conn, ref, data)
+    conn
   end
 
   def response({:ok, resp}, conn, opts) do
@@ -311,11 +359,9 @@ defmodule ReverseProxyPlug do
       "te",
       "transfer-encoding",
       "trailer",
-      "connection",
       "keep-alive",
       "proxy-authenticate",
-      "proxy-authorization",
-      "upgrade"
+      "proxy-authorization"
     ]
 
     headers

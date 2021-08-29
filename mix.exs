@@ -52,6 +52,10 @@ defmodule ReverseProxyPlug.MixProject do
     [
       {:plug, "~> 1.6"},
       {:cowboy, "~> 2.4"},
+      {:castore, "~> 0.1.0"},
+      # TODO: Make optional?
+      {:mint, "~> 1.0"},
+      {:mint_web_socket, "~> 0.1.4"},
       {:httpoison, "~> 1.2", optional: true},
       {:credo, "~> 1.0", only: [:dev, :test]},
       {:mox, "~> 1.0", only: :test, optional: true},
